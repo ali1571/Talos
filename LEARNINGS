@@ -1,0 +1,44 @@
+COOL THINGS I LEARNED WRITING THIS PIECE OF SOFTWARE
+
+Image.LANCZOS
+
+When you resize an image up (making it bigger), PIL has to invent new pixels that didn't exist before — it's interpolating. The resampling algorithm you choose determines how it fills in those new pixels, and it matters a lot for text clarity.
+
+PIL's resize options include things like:
+
+NEAREST — just duplicates the nearest existing pixel. Fast, but blocky/jagged — makes text look like chunky Minecraft blocks when upscaled.
+BILINEAR — averages the 4 nearest pixels. Smoother than nearest, but can blur edges.
+LANCZOS — uses a more sophisticated windowed sinc function across a wider neighborhood of pixels (not just 4 adjacent ones) to reconstruct sharper edges while still smoothing out jagged artifacts.
+
+For text specifically, LANCZOS tends to preserve letter edges/strokes better than the simpler methods — which matters a lot for OCR, since Tesseract is trying to recognize character shapes, and a blurry or blocky "e" can easily get misread as a "c" or "o". It's slower computationally than NEAREST/BILINEAR, but for a tiny crop region like yours (200x30px before scaling), the performance cost is negligible — we're talking milliseconds, not something that'll bottleneck your loop.
+
+Why .convert('L')
+
+'L' is PIL's mode string for 8-bit grayscale (L = "luminance"). Your screenshot comes in as RGB (or RGBA) — each pixel has separate Red, Green, Blue values. Tesseract doesn't need color information to read text; it only cares about light vs dark contrast between text and background. Converting to grayscale collapses each pixel from 3 (or 4) channels down to a single brightness value (0=black, 255=white), which:
+
+Simplifies the next steps (invert, threshold) — those operations work on a single brightness value per pixel, not three separate RGB channels.
+Reduces noise from color variation that doesn't actually help OCR (e.g. slight color banding/compression artifacts in the navy background that don't matter once you only care about brightness).
+What binarized is, and what the code does
+
+"Binarize" means converting an image so every pixel is only one of two values — pure black or pure white, nothing in between (no grays). This is also called thresholding.
+
+Step by step:
+
+python
+gray = text_region.convert('L')
+
+Now every pixel is a single number 0–255 (0=black, 255=white). Since your original was white text on navy, after grayscale: text pixels are near 255 (bright), background pixels are some darker navy-gray value, say around 40-70 (navy is a fairly dark color).
+
+python
+inverted = ImageOps.invert(gray)
+
+This flips every pixel: new_value = 255 - old_value. So former bright text (255) becomes near 0 (black), and former dark navy background (~50) becomes near 255-50=205 (light/bright). Now you have dark text on a light background — which matches what Tesseract was trained on and reads best.
+
+python
+binarized = inverted.point(lambda p: 255 if p > 100 else 0)
+
+.point() applies a function to every single pixel in the image. The lambda says: for each pixel value p, if it's brighter than 100, force it all the way to 255 (pure white); otherwise force it to 0 (pure black). This is the actual thresholding step — it removes any middle-gray noise/antialiasing/JPEG-artifact fuzziness and forces a hard, clean boundary between "this is background" and "this is text."
+
+Why bother with this last step if invert already gave us dark-on-light? Because real screenshots aren't clean — antialiasing (smoothing at letter edges), slight color compression, and the earlier upscaling step all introduce intermediate gray values around the edges of letters. Left alone, those grays can confuse Tesseract's edge detection. Forcing everything to pure black/white removes that ambiguity — every pixel is unambiguously "text" or "not text," which gives Tesseract a much cleaner shape to recognize.
+
+The threshold number (100 in this case) is the cutoff point deciding what counts as "text" vs "background" — pick it too low and background noise gets included as if it were text; too high and parts of thinner letter strokes might get erased. That's why I want you to visually check debug_binarized.png — if the letters look broken/patchy, the threshold's probably too aggressive one way or the other, and we'd nudge that number up or down based on what you see.

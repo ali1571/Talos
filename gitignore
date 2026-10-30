@@ -1,0 +1,20 @@
+# Ignore everything in the folder by default
+*
+
+# Do not ignore directories (needed so git can search for tracked files)
+!*/
+
+# Explicitly track only AutomatonV2 and its dependencies
+!AutomatonV2.py
+!numbergenonly.py
+!saved_msg.png
+!debug_capture.png
+!README.md
+!link.txt.example
+!.gitignore
+
+# Ignore sensitive/runtime/debug files explicitly
+debug_capture.png
+link.txt
+*.pyc
+__pycache__/
